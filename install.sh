@@ -1,89 +1,173 @@
 #!/bin/bash
 
+REPO="https://github.com/b10189ahmedali-pixel/HITLOSA.git"
+FOLDER="HITLOSA"
+
 clear
-echo "=================================="
-echo "       HITLOSA AUTO INSTALLER     "
-echo "=================================="
 
-# Update packages
-sudo apt update -y
+# ---------- Colors ----------
+GREEN='\033[0;32m'
+RED='\033[0;31m'
+CYAN='\033[0;36m'
+NC='\033[0m'
 
-# Install required packages
-sudo apt install -y curl git unzip build-essential
+# ---------- Detect App Port ----------
+detect_port() {
+    if grep -q "\"dev\":.*vite" package.json 2>/dev/null; then
+        echo "5173"
+        return
+    fi
 
-# Install Node.js 20 if missing
-if ! command -v node >/dev/null 2>&1; then
-    curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-    sudo apt install -y nodejs
-fi
+    if grep -q "\"start\":.*react-scripts" package.json 2>/dev/null; then
+        echo "3000"
+        return
+    fi
 
-# Install PM2 globally
-sudo npm install -g pm2
+    echo "8080"
+}
 
-# Clone project
-git clone https://github.com/b10189ahmedali-pixel/HITLOSA.git
-cd HITLOSA || exit
+# ---------- Install Base ----------
+install_requirements() {
+    sudo apt update -y
+    sudo apt install -y curl git unzip build-essential ufw
 
-# Ask Admin Details
-echo ""
-echo "====== Admin Setup ======"
-read -p "Username: " ADMIN_USER
-read -p "Password: " ADMIN_PASS
-read -p "Email: " ADMIN_EMAIL
-read -p "First Name: " ADMIN_FIRST
-read -p "Last Name: " ADMIN_LAST
+    if ! command -v node >/dev/null 2>&1; then
+        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
+        sudo apt install -y nodejs
+    fi
+
+    sudo npm install -g pm2
+}
+
+# ---------- Open Port ----------
+open_port() {
+    PORT=$1
+    sudo ufw allow $PORT/tcp >/dev/null 2>&1
+}
+
+# ---------- Install Files ----------
+install_files() {
+    clear
+    echo -e "${CYAN}Installing files...${NC}"
+
+    install_requirements
+
+    if [ -d "$FOLDER" ]; then
+        echo "Folder exists. Updating..."
+        cd "$FOLDER" || exit
+        git pull
+    else
+        git clone "$REPO"
+        cd "$FOLDER" || exit
+    fi
+
+    npm install
+
+    PORT=$(detect_port)
+
+    echo ""
+    echo "Detected App Port: $PORT"
+
+    open_port $PORT
+
+    # Kill old process
+    pm2 delete hitlosa >/dev/null 2>&1
+
+    # React CRA
+    if grep -q "\"start\":.*react-scripts" package.json 2>/dev/null; then
+        PORT=$PORT pm2 start npm --name hitlosa -- start
+
+    # Vite
+    elif grep -q "\"dev\":.*vite" package.json 2>/dev/null; then
+        pm2 start "npm run dev -- --host 0.0.0.0 --port $PORT" --name hitlosa
+
+    # Fallback
+    else
+        PORT=$PORT pm2 start npm --name hitlosa -- start
+    fi
+
+    pm2 save
+
+    echo ""
+    echo -e "${GREEN}Files Installed Successfully${NC}"
+    echo -e "${GREEN}Running on Port: $PORT${NC}"
+}
+
+# ---------- Admin Setup ----------
+admin_setup() {
+    clear
+    cd "$FOLDER" 2>/dev/null || { echo "Install files first."; return; }
+
+    echo "====== ADMIN SETUP ======"
+    read -p "Username: " USERNAME
+    read -p "Password: " PASSWORD
+    read -p "Email: " EMAIL
+    read -p "First Name: " FIRST
+    read -p "Last Name: " LAST
 
 cat > admin.json <<EOF
 {
-  "username": "$ADMIN_USER",
-  "password": "$ADMIN_PASS",
-  "email": "$ADMIN_EMAIL",
-  "first_name": "$ADMIN_FIRST",
-  "last_name": "$ADMIN_LAST"
+  "username":"$USERNAME",
+  "password":"$PASSWORD",
+  "email":"$EMAIL",
+  "first_name":"$FIRST",
+  "last_name":"$LAST"
 }
 EOF
 
-# Ask Node Details
-echo ""
-echo "====== Node Setup ======"
-read -p "Node Token: " NODE_TOKEN
-read -p "Token ID: " TOKEN_ID
-read -p "Panel Link: " PANEL_LINK
-read -p "Panel ID: " PANEL_ID
+    echo -e "${GREEN}Admin Setup Completed${NC}"
+}
+
+# ---------- Node Setup ----------
+node_setup() {
+    clear
+    cd "$FOLDER" 2>/dev/null || { echo "Install files first."; return; }
+
+    echo "====== NODE SETUP ======"
+    read -p "Node Token: " TOKEN
+    read -p "Token ID: " TOKENID
+    read -p "Panel Link: " PANEL
+    read -p "Panel ID: " PANELID
 
 cat > nodes.json <<EOF
 {
-  "token": "$NODE_TOKEN",
-  "token_id": "$TOKEN_ID",
-  "panel_link": "$PANEL_LINK",
-  "panel_id": "$PANEL_ID"
+  "token":"$TOKEN",
+  "token_id":"$TOKENID",
+  "panel_link":"$PANEL",
+  "panel_id":"$PANELID"
 }
 EOF
 
-# Create folders
-mkdir -p servers
-mkdir -p logs
+    mkdir -p servers
 
-# Install dependencies
-echo ""
-echo "Installing dependencies..."
-npm install
+    echo -e "${GREEN}Node Setup Completed${NC}"
+}
 
-# Build React + TypeScript frontend
-if [ -f package.json ]; then
-    npm run build || true
-fi
-
-# Start app with PM2
-pm2 start npm --name "hitlosa" -- start
-pm2 save
-pm2 startup
-
-echo ""
+# ---------- Menu ----------
+while true
+do
+clear
 echo "=================================="
-echo " HITLOSA INSTALLED SUCCESSFULLY "
+echo "        HITLOSA INSTALLER         "
 echo "=================================="
-echo "Panel Running with PM2"
-echo "Use: pm2 logs hitlosa"
-echo "Use: pm2 restart hitlosa"
-echo "Use: pm2 stop hitlosa"
+echo "1) Install Files + Run Panel"
+echo "2) Admin Setup"
+echo "3) Node Setup"
+echo "4) Restart Panel"
+echo "5) View Logs"
+echo "6) Exit"
+echo "=================================="
+read -p "Select Option: " choice
+
+case $choice in
+1) install_files ;;
+2) admin_setup ;;
+3) node_setup ;;
+4) pm2 restart hitlosa ;;
+5) pm2 logs hitlosa ;;
+6) exit ;;
+*) echo "Invalid Option" ;;
+esac
+
+read -p "Press Enter To Continue..."
+done
