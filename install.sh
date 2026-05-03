@@ -5,169 +5,109 @@ FOLDER="HITLOSA"
 
 clear
 
-# ---------- Colors ----------
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+install_base() {
+  if command -v apt >/dev/null 2>&1; then
+    apt update -y >/dev/null 2>&1
+    apt install -y git curl >/dev/null 2>&1
+  fi
 
-# ---------- Detect App Port ----------
-detect_port() {
-    if grep -q "\"dev\":.*vite" package.json 2>/dev/null; then
-        echo "5173"
-        return
-    fi
-
-    if grep -q "\"start\":.*react-scripts" package.json 2>/dev/null; then
-        echo "3000"
-        return
-    fi
-
-    echo "8080"
+  if ! command -v node >/dev/null 2>&1; then
+    echo "Node.js required in CodeSandbox template."
+    exit 1
+  fi
 }
 
-# ---------- Install Base ----------
-install_requirements() {
-    sudo apt update -y
-    sudo apt install -y curl git unzip build-essential ufw
+run_app() {
+  cd "$FOLDER" || exit
+  npm install
 
-    if ! command -v node >/dev/null 2>&1; then
-        curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-        sudo apt install -y nodejs
-    fi
+  # remove old process if any
+  pkill -f vite >/dev/null 2>&1
+  pkill -f react-scripts >/dev/null 2>&1
+  pkill -f next >/dev/null 2>&1
 
-    sudo npm install -g pm2
+  # Vite
+  if grep -q "\"dev\":.*vite" package.json; then
+    echo "Starting Vite on 0.0.0.0:8080"
+    npm run dev -- --host 0.0.0.0 --port 8080
+
+  # Create React App
+  elif grep -q "react-scripts" package.json; then
+    echo "Starting CRA on 0.0.0.0:8080"
+    HOST=0.0.0.0 PORT=8080 npm start
+
+  # Next.js
+  elif grep -q "\"dev\":.*next dev" package.json; then
+    echo "Starting Next.js on 0.0.0.0:8080"
+    npx next dev -H 0.0.0.0 -p 8080
+
+  # Generic
+  else
+    echo "Trying npm start on 0.0.0.0:8080"
+    HOST=0.0.0.0 PORT=8080 npm start
+  fi
 }
 
-# ---------- Open Port ----------
-open_port() {
-    PORT=$1
-    sudo ufw allow $PORT/tcp >/dev/null 2>&1
-}
-
-# ---------- Install Files ----------
 install_files() {
-    clear
-    echo -e "${CYAN}Installing files...${NC}"
+  install_base
 
-    install_requirements
+  if [ -d "$FOLDER" ]; then
+    cd "$FOLDER" && git pull && cd ..
+  else
+    git clone "$REPO"
+  fi
 
-    if [ -d "$FOLDER" ]; then
-        echo "Folder exists. Updating..."
-        cd "$FOLDER" || exit
-        git pull
-    else
-        git clone "$REPO"
-        cd "$FOLDER" || exit
-    fi
-
-    npm install
-
-    PORT=$(detect_port)
-
-    echo ""
-    echo "Detected App Port: $PORT"
-
-    open_port $PORT
-
-    # Kill old process
-    pm2 delete hitlosa >/dev/null 2>&1
-
-    # React CRA
-    if grep -q "\"start\":.*react-scripts" package.json 2>/dev/null; then
-        PORT=$PORT pm2 start npm --name hitlosa -- start
-
-    # Vite
-    elif grep -q "\"dev\":.*vite" package.json 2>/dev/null; then
-        pm2 start "npm run dev -- --host 0.0.0.0 --port $PORT" --name hitlosa
-
-    # Fallback
-    else
-        PORT=$PORT pm2 start npm --name hitlosa -- start
-    fi
-
-    pm2 save
-
-    echo ""
-    echo -e "${GREEN}Files Installed Successfully${NC}"
-    echo -e "${GREEN}Running on Port: $PORT${NC}"
+  run_app
 }
 
-# ---------- Admin Setup ----------
 admin_setup() {
-    clear
-    cd "$FOLDER" 2>/dev/null || { echo "Install files first."; return; }
-
-    echo "====== ADMIN SETUP ======"
-    read -p "Username: " USERNAME
-    read -p "Password: " PASSWORD
-    read -p "Email: " EMAIL
-    read -p "First Name: " FIRST
-    read -p "Last Name: " LAST
+  cd "$FOLDER" || exit
+  read -p "Username: " u
+  read -p "Password: " p
+  read -p "Email: " e
 
 cat > admin.json <<EOF
 {
-  "username":"$USERNAME",
-  "password":"$PASSWORD",
-  "email":"$EMAIL",
-  "first_name":"$FIRST",
-  "last_name":"$LAST"
+ "username":"$u",
+ "password":"$p",
+ "email":"$e"
 }
 EOF
 
-    echo -e "${GREEN}Admin Setup Completed${NC}"
+ echo "Admin saved."
 }
 
-# ---------- Node Setup ----------
 node_setup() {
-    clear
-    cd "$FOLDER" 2>/dev/null || { echo "Install files first."; return; }
-
-    echo "====== NODE SETUP ======"
-    read -p "Node Token: " TOKEN
-    read -p "Token ID: " TOKENID
-    read -p "Panel Link: " PANEL
-    read -p "Panel ID: " PANELID
+  cd "$FOLDER" || exit
+  read -p "Node Token: " t
+  read -p "Panel Link: " l
 
 cat > nodes.json <<EOF
 {
-  "token":"$TOKEN",
-  "token_id":"$TOKENID",
-  "panel_link":"$PANEL",
-  "panel_id":"$PANELID"
+ "token":"$t",
+ "panel":"$l"
 }
 EOF
 
-    mkdir -p servers
-
-    echo -e "${GREEN}Node Setup Completed${NC}"
+ echo "Node saved."
 }
 
-# ---------- Menu ----------
 while true
 do
 clear
-echo "=================================="
-echo "        HITLOSA INSTALLER         "
-echo "=================================="
-echo "1) Install Files + Run Panel"
+echo "==== HITLOSA MENU ===="
+echo "1) Install Files + Start Port 8080"
 echo "2) Admin Setup"
 echo "3) Node Setup"
-echo "4) Restart Panel"
-echo "5) View Logs"
-echo "6) Exit"
-echo "=================================="
-read -p "Select Option: " choice
+echo "4) Exit"
+read -p "Select: " c
 
-case $choice in
+case $c in
 1) install_files ;;
 2) admin_setup ;;
 3) node_setup ;;
-4) pm2 restart hitlosa ;;
-5) pm2 logs hitlosa ;;
-6) exit ;;
-*) echo "Invalid Option" ;;
+4) exit ;;
 esac
 
-read -p "Press Enter To Continue..."
+read -p "Press enter..."
 done
